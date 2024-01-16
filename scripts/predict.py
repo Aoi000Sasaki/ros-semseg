@@ -22,14 +22,14 @@ from loss.optimizer import get_optimizer, restore_net
 import datasets
 import network
 
-camera_topics = [
-    'cam_back/raw',
-    'cam_back_left/raw',
-    # 'cam_back_right/raw',
-    # 'cam_front/raw',
-    # 'cam_front_left/raw',
-    # 'cam_front_right/raw',
-]
+cam_tpc_fid = {
+    'cam_back/raw' : 'cam_back',
+    'cam_back_left/raw' : 'cam_back_left',
+    'cam_back_right/raw' : 'cam_back_right',
+    'cam_front/raw' : 'cam_front',
+    'cam_front_left/raw' : 'cam_front_left',
+    'cam_front_right/raw' : 'cam_front_right',
+}
 
 parser = argparse.ArgumentParser(description='Semantic Segmentation')
 parser.add_argument('--lr', type=float, default=0.002)
@@ -295,13 +295,13 @@ class SemanticSegmentation():
 
         torch.cuda.empty_cache()
 
-        for topic in camera_topics:
-            stripped_topic = topic.strip('/raw')
-            pubname = stripped_topic + '/pred'
-            self.publishers[stripped_topic] = rospy.Publisher(pubname, ROS_Image, queue_size=1)
-            rospy.loginfo('initialized publisher' + '(' + pubname + ')')
+        for topic in cam_tpc_fid.keys():
+            frame_id = cam_tpc_fid[topic]
+            pubname = frame_id + '/pred'
+            self.publishers[frame_id] = rospy.Publisher(pubname, ROS_Image, queue_size=1)
 
     def process_msgs(self, *msgs):
+        rospy.loginfo('synced')
         for msg in msgs:
             self.predict(msg)            # self.predict(msg)
 
@@ -341,7 +341,8 @@ class SemanticSegmentation():
         ros_img_msg.header = header_info
 
         frame_id = ros_img_msg.header.frame_id
-        self.publishers[frame_id].publish(ros_img_msg)
+        pub = self.publishers[frame_id]
+        pub.publish(ros_img_msg)
         prediction_pil.save('../debug/' + frame_id + '_pred_img.png')
         rospy.loginfo('published image' + '(' + frame_id + '/pred)')
 
@@ -351,7 +352,7 @@ if __name__ == '__main__':
         rospy.init_node('labeling_node', anonymous=True)
         seg_module = SemanticSegmentation()
         subscribers = []
-        for topic in camera_topics:
+        for topic in cam_tpc_fid.keys():
             subscribers.append(message_filters.Subscriber(topic, ROS_Image))
         msg_sync =  message_filters.ApproximateTimeSynchronizer(subscribers, 10, 0.1)
         msg_sync.registerCallback(seg_module.process_msgs)
