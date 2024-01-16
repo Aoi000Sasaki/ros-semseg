@@ -9,6 +9,7 @@ import numpy as np
 import rospy
 from sensor_msgs.msg import Image as ROS_Image
 from cv_bridge import CvBridge
+import message_filters
 
 from apex import amp
 from runx.logx import logx
@@ -21,10 +22,14 @@ from loss.optimizer import get_optimizer, restore_net
 import datasets
 import network
 
-
-# for debug
-from PIL import Image
-
+camera_topics = [
+    'cam_back/raw',
+    'cam_back_left/raw',
+    # 'cam_back_right/raw',
+    # 'cam_front/raw',
+    # 'cam_front_left/raw',
+    # 'cam_front_right/raw',
+]
 
 parser = argparse.ArgumentParser(description='Semantic Segmentation')
 parser.add_argument('--lr', type=float, default=0.002)
@@ -248,7 +253,7 @@ class SemanticSegmentation():
         self.args.best_record = {'epoch': -1, 'iter': 0, 'val_loss': 1e10, 'acc': 0,
                     'acc_cls': 0, 'mean_iu': 0, 'fwavacc': 0}
         self.bridge = CvBridge()
-        self.pub = rospy.Publisher('/pred_img', ROS_Image, queue_size=1)
+        self.publishers = {}
         torch.backends.cudnn.benchmark = True
 
         if 'WORLD_SIZE' in os.environ and self.args.apex:
@@ -290,6 +295,16 @@ class SemanticSegmentation():
 
         torch.cuda.empty_cache()
 
+        for topic in camera_topics:
+            stripped_topic = topic.strip('/raw')
+            pubname = stripped_topic + '/pred'
+            self.publishers[stripped_topic] = rospy.Publisher(pubname, ROS_Image, queue_size=1)
+            rospy.loginfo('initialized publisher' + '(' + pubname + ')')
+
+    def process_msgs(self, *msgs):
+        for msg in msgs:
+            self.predict(msg)            # self.predict(msg)
+
     def predict(self, msg):
         header_info = msg.header
         cv_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -325,16 +340,21 @@ class SemanticSegmentation():
         ros_img_msg = self.bridge.cv2_to_imgmsg(pub_cv_img, encoding='bgr8')
         ros_img_msg.header = header_info
 
-        self.pub.publish(ros_img_msg)
-        prediction_pil.save('../debug/pred_img.png')
-        rospy.loginfo('published image')
+        frame_id = ros_img_msg.header.frame_id
+        self.publishers[frame_id].publish(ros_img_msg)
+        prediction_pil.save('../debug/' + frame_id + '_pred_img.png')
+        rospy.loginfo('published image' + '(' + frame_id + '/pred)')
 
 
 if __name__ == '__main__':
-    semseg = SemanticSegmentation()
     try:
         rospy.init_node('labeling_node', anonymous=True)
-        rospy.Subscriber('/semantickitti/camera_color_left/image_raw', ROS_Image, semseg.predict, queue_size=1, buff_size=2**32)
+        seg_module = SemanticSegmentation()
+        subscribers = []
+        for topic in camera_topics:
+            subscribers.append(message_filters.Subscriber(topic, ROS_Image))
+        msg_sync =  message_filters.ApproximateTimeSynchronizer(subscribers, 10, 0.1)
+        msg_sync.registerCallback(seg_module.process_msgs)
         rospy.spin()
     
     except rospy.ROSInterruptException:
