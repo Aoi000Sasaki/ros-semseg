@@ -33,6 +33,7 @@ cam_tpc_fid = {
 }
 is_contain_lidar = True
 lidar_frame_id = 'lidar_top'
+synced_lidar_frame_id = 'lidar_top_synced'
 
 parser = argparse.ArgumentParser(description='Semantic Segmentation')
 parser.add_argument('--lr', type=float, default=0.002)
@@ -302,7 +303,7 @@ class SemanticSegmentation():
             frame_id = cam_tpc_fid[topic]
             pubname = frame_id + '/pred'
             self.publishers[frame_id] = rospy.Publisher(pubname, ROS_Image, queue_size=1)
-        self.publishers[lidar_frame_id] = rospy.Publisher(lidar_frame_id, PointCloud2, queue_size=1)
+        self.publishers[lidar_frame_id] = rospy.Publisher(synced_lidar_frame_id, PointCloud2, queue_size=1)
 
     def process_msgs(self, *msgs):
         rospy.loginfo('synced')
@@ -316,7 +317,7 @@ class SemanticSegmentation():
         for msg in pub_msgs:
             self.publishers[msg.header.frame_id].publish(msg)
             if msg.header.frame_id == lidar_frame_id:
-                rospy.loginfo('published ' + '(' + msg.header.frame_id + ')')
+                rospy.loginfo('published ' + '(' + synced_lidar_frame_id + ')')
             else:
                 rospy.loginfo('published ' + '(' + msg.header.frame_id + '/pred)')
 
