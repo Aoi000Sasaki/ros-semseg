@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import rospy
 from sensor_msgs.msg import Image as ROS_Image
+from sensor_msgs.msg import PointCloud2
 from cv_bridge import CvBridge
 import message_filters
 
@@ -30,6 +31,8 @@ cam_tpc_fid = {
     'cam_front_left/raw' : 'cam_front_left',
     'cam_front_right/raw' : 'cam_front_right',
 }
+is_contain_lidar = True
+lidar_frame_id = 'lidar_top'
 
 parser = argparse.ArgumentParser(description='Semantic Segmentation')
 parser.add_argument('--lr', type=float, default=0.002)
@@ -299,11 +302,23 @@ class SemanticSegmentation():
             frame_id = cam_tpc_fid[topic]
             pubname = frame_id + '/pred'
             self.publishers[frame_id] = rospy.Publisher(pubname, ROS_Image, queue_size=1)
+        self.publishers[lidar_frame_id] = rospy.Publisher(lidar_frame_id, PointCloud2, queue_size=1)
 
     def process_msgs(self, *msgs):
         rospy.loginfo('synced')
+        pub_msgs = []
         for msg in msgs:
-            self.predict(msg)            # self.predict(msg)
+            if is_contain_lidar and msg.header.frame_id == lidar_frame_id:
+                pub_msgs.append(msg)
+            else:
+                pub_msgs.append(self.predict(msg))
+
+        for msg in pub_msgs:
+            self.publishers[msg.header.frame_id].publish(msg)
+            if msg.header.frame_id == lidar_frame_id:
+                rospy.loginfo('published ' + '(' + msg.header.frame_id + ')')
+            else:
+                rospy.loginfo('published ' + '(' + msg.header.frame_id + '/pred)')
 
     def predict(self, msg):
         header_info = msg.header
@@ -341,17 +356,18 @@ class SemanticSegmentation():
         ros_img_msg.header = header_info
 
         frame_id = ros_img_msg.header.frame_id
-        pub = self.publishers[frame_id]
-        pub.publish(ros_img_msg)
         prediction_pil.save('../debug/' + frame_id + '_pred_img.png')
-        rospy.loginfo('published image' + '(' + frame_id + '/pred)')
+        rospy.loginfo('saved ' + frame_id + '_pred_img.png')
 
+        return ros_img_msg
 
 if __name__ == '__main__':
     try:
         rospy.init_node('labeling_node', anonymous=True)
+
         seg_module = SemanticSegmentation()
         subscribers = []
+        subscribers.append(message_filters.Subscriber('lidar_top', PointCloud2))
         for topic in cam_tpc_fid.keys():
             subscribers.append(message_filters.Subscriber(topic, ROS_Image))
         msg_sync =  message_filters.ApproximateTimeSynchronizer(subscribers, 10, 0.1)
